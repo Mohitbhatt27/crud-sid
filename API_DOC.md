@@ -4,7 +4,7 @@ This API provides user authentication and management endpoints. All responses ar
 
 ## Base URL
 ```
-http://<your-server-domain>/
+https://crud-sid.onrender.com/
 ```
 
 ---

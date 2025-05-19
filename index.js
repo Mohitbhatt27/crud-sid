@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import userRoutes from './routes/userRoutes.js';
+import cors from 'cors';
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI, {
@@ -16,6 +17,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 const app = express();
 app.use(express.json());
+app.use(cors({ origin: false })); // disables CORS for all origins
 app.use('/', userRoutes);
 
 // Serve API documentation as HTML at '/'
