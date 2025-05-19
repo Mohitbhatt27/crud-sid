@@ -1,12 +1,11 @@
+import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
-import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-
-const app = express();
-app.use(express.json());
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import userRoutes from './routes/userRoutes.js';
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI, {
@@ -15,96 +14,78 @@ mongoose.connect(process.env.MONGODB_URI, {
 }).then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// User Schema
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true }
-});
-const User = mongoose.model('User', userSchema);
+const app = express();
+app.use(express.json());
+app.use('/', userRoutes);
 
-// Middleware to verify JWT
-function auth(req, res, next) {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
+// Serve API documentation as HTML at '/'
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.get('/', (req, res) => {
+  const docPath = path.join(__dirname, 'API_DOC.md');
+  fs.readFile(docPath, 'utf8', (err, data) => {
+    if (err) return res.status(500).send('Documentation not found');
+    // Convert markdown to HTML
+    import('marked').then(marked => {
+      const html = marked.parse(data);
+      // Add JS to toggle example responses
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User API Documentation</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-light.min.css" rel="stylesheet">
+  <style>
+    body { background: #f6f8fa; margin: 0; padding: 0; }
+    .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 900px; margin: 40px auto; padding: 32px; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .example-response { background: #f0f6ff; border-left: 4px solid #0070f3; margin: 16px 0; padding: 12px 16px; font-size: 15px; font-family: monospace; border-radius: 4px; }
+    .example-label { font-weight: bold; color: #0070f3; margin-bottom: 4px; display: block; }
+  </style>
+</head>
+<body>
+  <article class="markdown-body">
+    ${html}
+    <h2>Example Responses</h2>
+    <div class="example-label">Signup Success (201):</div>
+    <div class="example-response">{ "message": "User created" }</div>
+    <div class="example-label">Signup Error (409):</div>
+    <div class="example-response">{ "error": "Username or email already exists" }</div>
+    <div class="example-label">Login Success (200):</div>
+    <div class="example-response">{
+  "token": "&lt;jwt_token&gt;",
+  "user": {
+    "_id": "user_id",
+    "username": "johndoe",
+    "name": "John Doe",
+    "email": "john@example.com"
   }
-}
-
-// Signup
-app.post('/signup', async (req, res) => {
-  const { username, password, name, email } = req.body;
-  if (!username || !password || !name || !email) return res.status(400).json({ error: 'All fields required' });
-  try {
-    const existing = await User.findOne({ $or: [{ username }, { email }] });
-    if (existing) return res.status(409).json({ error: 'Username or email already exists' });
-    const hashed = await bcrypt.hash(password, 10);
-    const user = new User({ username, password: hashed, name, email });
-    await user.save();
-    res.status(201).json({ message: 'User created' });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Login
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  try {
-    const user = await User.findOne({ username });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    res.json({ token });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Get user
-app.get('/user/:id', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id).select('-password');
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Update user
-app.put('/user/:id', auth, async (req, res) => {
-  const { name, email, password } = req.body;
-  try {
-    const update = {};
-    if (name) update.name = name;
-    if (email) update.email = email;
-    if (password) update.password = await bcrypt.hash(password, 10);
-    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Delete user
-app.delete('/user/:id', auth, async (req, res) => {
-  try {
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ message: 'User deleted' });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
+}</div>
+    <div class="example-label">Login Error (401):</div>
+    <div class="example-response">{ "error": "Invalid credentials" }</div>
+    <div class="example-label">Get User Success (200):</div>
+    <div class="example-response">{
+  "_id": "user_id",
+  "username": "johndoe",
+  "name": "John Doe",
+  "email": "john@example.com"
+}</div>
+    <div class="example-label">Get User Error (404):</div>
+    <div class="example-response">{ "error": "User not found" }</div>
+    <div class="example-label">Update User Success (200):</div>
+    <div class="example-response">{
+  "_id": "user_id",
+  "username": "johndoe",
+  "name": "Jane Doe",
+  "email": "jane@example.com"
+}</div>
+    <div class="example-label">Delete User Success (200):</div>
+    <div class="example-response">{ "message": "User deleted" }</div>
+  </article>
+</body>
+</html>`);
+    });
+  });
 });
 
 const PORT = process.env.PORT || 10000;
