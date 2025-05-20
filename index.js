@@ -17,7 +17,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: false })); // disables CORS for all origins
+app.use(cors()); // allow CORS for all origins
 app.use('/', userRoutes);
 
 // Serve API documentation as HTML at '/'
